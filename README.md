@@ -25,7 +25,6 @@ TIME_STR = timestamped_file_name()
 DUMP_PATH = "adsb_exchange_data_{}.h5".format(TIME_STR).replace(" ", "_")
 
 if __name__ == '__main__':
-    # FUTURE move start() functionalities into a shared class instead of different implementations for each data source
     vrs.start(TIME_STR, DUMP_PATH)
 ```
 
