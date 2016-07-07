@@ -29,10 +29,6 @@ if __name__ == '__main__':
     vrs.start(TIME_STR, DUMP_PATH)
 ```
 
-## Contributors
-
-Currently me, myself, and I. I'm happy to enhance this project with others, don't hesitate to reach out!
-
 ## License
 
 This software is released with the Apache License. Download it, use it, change it, share it. Just keep the license!
