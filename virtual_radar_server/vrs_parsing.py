@@ -7,61 +7,16 @@ Follows the protocol defined below
 
 import logging
 import os
-import time
-from datetime import datetime
 
 import numpy as np
 import pandas as pd
 import requests
 import simplejson
 
-from adsb_parsing.utils import timestamped_file_name
-
-TIME_STR = timestamped_file_name()
-DUMP_PATH = "../data/adsb_exchange_data_{}.h5".format(TIME_STR)
-
-logging.basicConfig(filename="../logs/munge_{}.log".format(TIME_STR),
-                    level=logging.DEBUG)
+from adsb_parsing.utils import DurationTaskRunner
 
 
-class DurationTask(object):
-
-    SECONDS_PER_HOUR = 3600
-    ITERATION_BREAK_INTERVAL = 10
-    ITERATION_BREAK_LENGTH = 2
-
-    def __init__(self, duration, task):
-        self.duration = duration
-        self.start_time = datetime.now()
-        self.task = task
-        self.iteration_count = 0
-
-    def elapsed_time_hours(self):
-        return (datetime.now() - self.start_time).seconds / DurationTask.SECONDS_PER_HOUR
-
-    def allow_user_safe_exit(self):
-        self.iteration_count += 1
-        if self.iteration_count == DurationTask.ITERATION_BREAK_INTERVAL:
-            print("Allowing {} seconds to end program...".format(DurationTask.ITERATION_BREAK_LENGTH))
-            time.sleep(2)
-            print("Continuing dump to {}".format(DUMP_PATH))
-            self.iteration_count = 0
-
-    def start(self):
-        # log for the desired number of hours before closing.
-        # when iteration_count reaches DurationTask.ITERATION_BREAK_INTERVAL, allow the user a few seconds to
-        # close the program without risk of closing during an I/O process
-        while self.elapsed_time_hours() < self.duration:
-            # invoke the task function
-            self.task()
-            # give the user a chance to safely break the program every once in a while, as defined by the constant
-            # ITERATION_BREAK_INTERVAL
-            self.allow_user_safe_exit()
-
-        print("Completed desired data log time of {} hours".format(self.duration))
-
-
-class ADSBLogger(object):
+class VRSParser(object):
     # URI for data
     LNK = "http://global.adsbexchange.com/VirtualRadar/AircraftList.json"
     # expected column fields and data types for the received data in the aircraft list
@@ -149,12 +104,12 @@ class ADSBLogger(object):
 
     def more(self):
         # get new data, formatted as a DataFrame with no missing values
-        data = ADSBLogger.get_data()
+        data = VRSParser.get_data()
 
         # ensure that a new version of the aircraft list has been supplied
         if data and data["lastDv"] != self.lastDataId:
             # format the data and append it to the file
-            self.formatted_df = ADSBLogger.format_data(data)
+            self.formatted_df = VRSParser.format_data(data)
             self.append_to_file(data["totalAc"])
 
             # update the version of the aircraft list to avoid duplicate data
@@ -168,26 +123,27 @@ class ADSBLogger(object):
             with pd.HDFStore(self.dump_file) as hdf:
                 if not self.file_exists:
                     hdf.put('/data/formatted', self.formatted_df, format='table', data_columns=True,
-                            min_itemsize=ADSBLogger.MIN_STR_SIZES)
+                            min_itemsize=VRSParser.MIN_STR_SIZES)
                     self.file_exists = True
                 else:
                     hdf.append('/data/formatted', self.formatted_df, format='table', data_columns=True,
-                               min_itemsize=ADSBLogger.MIN_STR_SIZES)
+                               min_itemsize=VRSParser.MIN_STR_SIZES)
+
+                # maintain the size of the data set, and report a rough MB file size estimate
+                self.num_entries += num_entries
+                print("Saved {} entries so far, total file size of ~{} MB".format(self.num_entries,
+                                                                                  os.path.getsize(
+                                                                                      self.dump_file) >> 20))
         except Exception as e:
             print("Error writing to HDF5 file. Saving df off to data/exception_info.pkl")
             print(e.args)
-            self.formatted_df.to_pickle("../data/exception_info.pkl")
-
-        # maintain the size of the data set, and report a rough MB file size estimate
-        self.num_entries += num_entries
-        print("Saved {} entries so far, total file size of ~{} MB".format(self.num_entries,
-                                                                          os.path.getsize(self.dump_file) >> 20))
+            self.formatted_df.to_pickle("exception_info.pkl")
 
     @staticmethod
     def get_data():
         data = None
         try:
-            data = requests.get(ADSBLogger.LNK).json()
+            data = requests.get(VRSParser.LNK).json()
         except simplejson.scanner.JSONDecodeError:
             print("""Invalid response received, and could not decode the JSON as a result.
             Ignoring this iteration of received data.""")
@@ -197,25 +153,26 @@ class ADSBLogger(object):
     @staticmethod
     def format_data(data):
         # ensure no missing values, and avoid string of overflow length
-        df = pd.DataFrame(data["acList"], columns=ADSBLogger.FIELDS)\
+        df = pd.DataFrame(data["acList"], columns=VRSParser.FIELDS)\
             .applymap(lambda x: np.nan if isinstance(x, str) and x == "" else x)\
             .applymap(lambda x: x[:47] if isinstance(x, str) and len(x) > 48 else x)\
-            .fillna(ADSBLogger.DEFAULTS)
-        df.to_pickle("../data/exception_info.pkl")
+            .fillna(VRSParser.DEFAULTS)
+        df.to_pickle("exception_info.pkl")
 
         # coerce data types
         for i, col in enumerate(df.columns):
-            df[col] = df[col].astype(ADSBLogger.TYPES[i])
+            df[col] = df[col].astype(VRSParser.TYPES[i])
         return df
 
     @staticmethod
     def get_formatted_data():
-        return ADSBLogger.format_data(ADSBLogger.get_data())
+        return VRSParser.format_data(VRSParser.get_data())
 
 
-if __name__ == '__main__':
-    print(DUMP_PATH)
-    adsb_logger = ADSBLogger(DUMP_PATH, file_exists=False)
-
-    task_runner = DurationTask(3.95, adsb_logger.more)
+def start(timestamp, dump_path):
+    logging.basicConfig(filename="collection_{}.log".format(timestamp),
+                        level=logging.DEBUG)
+    print("Logging to {}".format(dump_path))
+    adsb_logger = VRSParser(dump_path, file_exists=False)
+    task_runner = DurationTaskRunner(3.95, adsb_logger.more)
     task_runner.start()
