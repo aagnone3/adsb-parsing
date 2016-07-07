@@ -13,6 +13,22 @@ I came across [this site](https://www.flightradar24.com) and just got giddy. I n
 
 Clone and run! This is a lightweight repository that does not need any formal installation.
 
+# Getting Started
+
+Each submodule implements parsing for a data source. Simply import the desired submodule and call its start() function, providing a timestamp for unique file name creation and an output file name for the accumulated data.
+
+```python
+from adsb_parsing.virtual_radar_server import vrs_parsing as vrs
+from adsb_parsing.utils import timestamped_file_name
+
+TIME_STR = timestamped_file_name()
+DUMP_PATH = "adsb_exchange_data_{}.h5".format(TIME_STR).replace(" ", "_")
+
+if __name__ == '__main__':
+    # FUTURE move start() functionalities into a shared class instead of different implementations for each data source
+    vrs.start(TIME_STR, DUMP_PATH)
+```
+
 ## Contributors
 
 Currently me, myself, and I. I'm happy to enhance this project with others, don't hesitate to reach out!
